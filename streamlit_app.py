@@ -1,0 +1,497 @@
+import streamlit as st
+import pandas as pd
+import numpy as np
+import pickle
+from sklearn.metrics.pairwise import euclidean_distances
+
+# ============================================================================
+# CONFIGURACIÓN
+# ============================================================================
+
+st.set_page_config(
+    page_title="Primeira Analytics - Scouting System",
+    page_icon="⚽",
+    layout="wide",
+)
+
+# ============================================================================
+# CARGAR DATOS Y MODELOS
+# ============================================================================
+
+@st.cache_data
+def load_data():
+    file_id = "1Girk_-QfK4hggiOdBpmHH5fW6JzfKc03"
+    url = f"https://drive.google.com/uc?id={file_id}"
+    return pd.read_csv(url)
+
+@st.cache_resource
+def load_models():
+    with open('models.pkl', 'rb') as f:
+        models = pickle.load(f)
+    with open('archetype_weights.pkl', 'rb') as f:
+        weights = pickle.load(f)
+    with open('config.pkl', 'rb') as f:
+        config = pickle.load(f)
+    return models, weights, config
+
+df = load_data()
+models, weights, config = load_models()
+
+archetype_weights = weights['archetype_weights']
+POSITION_MAP = config['POSITION_TO_ARCHETYPES_NORM']
+ALL_PERF_FEATURES = config['ALL_PERFORMANCE_FEATURES']
+
+# ============================================================================
+# SIDEBAR
+# ============================================================================
+
+st.sidebar.title("⚽ Primeira Analytics")
+st.sidebar.markdown("---")
+
+module = st.sidebar.radio(
+    "Selecciona un módulo:",
+    [
+        "🔍 Módulo 1: Best by Budget",
+        "🔄 Módulo 2: Find Replacement",
+        "💎 Módulo 3: Undervalued Players",
+        "⭐ Módulo 4: Wonderkids",
+        "🔄 Módulo 5: Flip Opportunities",
+    ]
+)
+
+st.sidebar.markdown("---")
+st.sidebar.info(
+    "**Datos:** 22,877 jugadores\n"
+    "**Temporadas:** 2017-2025\n"
+    "**Ligas:** 7 europeas"
+)
+
+# ============================================================================
+# MÓDULO 1: BEST BY BUDGET
+# ============================================================================
+
+if "Módulo 1" in module:
+    st.title("🔍 Best by Budget")
+    st.markdown("Encuentra los mejores jugadores dentro de un presupuesto")
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        budget = st.number_input(
+            "Presupuesto (M€)",
+            min_value=0.5,
+            max_value=200.0,
+            value=30.0,
+            step=5.0
+        ) * 1_000_000
+    
+    with col2:
+        position = st.selectbox(
+            "Posición",
+            ["Todas"] + list(POSITION_MAP.keys())
+        )
+    
+    with col3:
+        season = st.selectbox(
+            "Temporada",
+            sorted(df['season'].unique(), reverse=True)
+        )
+    
+    min_90s = st.slider("Mínimo 90 minutos", 5, 40, 15)
+    min_score = st.slider("Score mínimo", 0, 100, 60)
+    
+    if st.button("🔍 Buscar", type="primary"):
+        df_search = df[
+            (df['season'] == season) &
+            (df['market_value_current'] <= budget) &
+            (df['performance_score'] >= min_score) &
+            (df['total_90s'] >= min_90s) &
+            (df['market_value_current'].notna())
+        ].copy()
+        
+        if position != "Todas":
+            df_search = df_search[
+                df_search['archetype'].isin(POSITION_MAP[position])
+            ]
+        
+        if len(df_search) == 0:
+            st.warning("Sin resultados con estos filtros")
+        else:
+            df_result = df_search.nlargest(20, 'performance_score')
+            
+            st.success(f"✅ {len(df_result)} jugadores encontrados")
+            
+            # Tabla
+            df_display = df_result[[
+                'Player', 'archetype', 'domestic_league', 'Age',
+                'performance_score', 'market_value_current',
+                'predicted_transfer_fee', 'gap_ratio'
+            ]].copy()
+            
+            df_display.columns = [
+                'Jugador', 'Arquetipo', 'Liga', 'Edad',
+                'Score', 'MV (TM)', 'Transfer Fee', 'Gap'
+            ]
+            
+            df_display['MV (TM)'] = df_display['MV (TM)'].apply(
+                lambda x: f"€{x/1e6:.1f}M"
+            )
+            df_display['Transfer Fee'] = df_display['Transfer Fee'].apply(
+                lambda x: f"€{x/1e6:.1f}M" if pd.notna(x) else "-"
+            )
+            df_display['Gap'] = df_display['Gap'].apply(
+                lambda x: f"x{x:.2f}" if pd.notna(x) else "-"
+            )
+            df_display['Score'] = df_display['Score'].round(1)
+            
+            st.dataframe(df_display, use_container_width=True, height=600)
+
+# ============================================================================
+# MÓDULO 2: FIND REPLACEMENT
+# ============================================================================
+
+elif "Módulo 2" in module:
+    st.title("🔄 Find Replacement")
+    st.markdown("Encuentra jugadores con perfil similar")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        player_name = st.text_input(
+            "Nombre del jugador",
+            placeholder="Ej: Pedri, Goretzka..."
+        )
+    
+    with col2:
+        budget = st.number_input(
+            "Presupuesto máximo (M€) - opcional",
+            min_value=0.0,
+            max_value=200.0,
+            value=0.0,
+            step=5.0
+        )
+    
+    season = st.selectbox(
+        "Temporada",
+        sorted(df['season'].unique(), reverse=True),
+        key="replacement_season"
+    )
+    
+    if st.button("🔍 Buscar reemplazos", type="primary"):
+        if not player_name:
+            st.warning("Ingresa un nombre de jugador")
+        else:
+            # Buscar jugador
+            ref_candidates = df[
+                df['Player'].str.contains(player_name, case=False, na=False)
+            ]
+            
+            if len(ref_candidates) == 0:
+                st.error(f"Jugador '{player_name}' no encontrado")
+            else:
+                ref_season = ref_candidates[ref_candidates['season'] == season]
+                ref = ref_season.iloc[0] if len(ref_season) > 0 else                       ref_candidates.sort_values('season', ascending=False).iloc[0]
+                
+                st.success(f"✅ Referencia: {ref['Player']} - {ref['archetype']}")
+                
+                # Columnas de percentiles
+                pct_cols = [f'pct_{f}' for f in ALL_PERF_FEATURES 
+                            if f'pct_{f}' in df.columns]
+                
+                # Top 15 features por peso
+                arch_weights = archetype_weights.get(ref['archetype'], {})
+                top_features = [
+                    f'pct_{feat}' for feat, _ in
+                    sorted(arch_weights.items(), key=lambda x: x[1], reverse=True)[:15]
+                    if f'pct_{feat}' in df.columns
+                ]
+                
+                if not top_features:
+                    st.error("Sin features de similitud disponibles")
+                else:
+                    ref_vector = ref[top_features].fillna(50).values.reshape(1, -1)
+                    
+                    # Pool
+                    df_pool = df[
+                        (df['season'] == season) &
+                        (df['archetype'] == ref['archetype']) &
+                        (~df['Player'].str.contains(player_name, case=False, na=False)) &
+                        (df['total_90s'] >= 10)
+                    ].copy()
+                    
+                    if budget > 0:
+                        df_pool = df_pool[
+                            df_pool['market_value_current'] <= budget * 1e6
+                        ]
+                    
+                    if len(df_pool) == 0:
+                        st.warning("Sin alternativas con estos filtros")
+                    else:
+                        pool_vectors = df_pool[top_features].fillna(50).values
+                        
+                        # Similitud
+                        feature_weights = np.array([
+                            arch_weights.get(f.replace('pct_', ''), 1/len(top_features))
+                            for f in top_features
+                        ])
+                        feature_weights = feature_weights / feature_weights.sum()
+                        
+                        diff = pool_vectors - ref_vector
+                        distances = np.sqrt(np.sum((diff ** 2) * feature_weights, axis=1))
+                        similarity = ((1 - distances / distances.max()) * 100).round(1)
+                        
+                        df_pool['similarity'] = similarity
+                        df_result = df_pool.nlargest(15, 'similarity')
+                        
+                        # Display
+                        df_display = df_result[[
+                            'Player', 'domestic_league', 'Age',
+                            'similarity', 'performance_score',
+                            'market_value_current', 'gap_ratio'
+                        ]].copy()
+                        
+                        df_display.columns = [
+                            'Jugador', 'Liga', 'Edad', 'Similitud',
+                            'Score', 'MV (TM)', 'Gap'
+                        ]
+                        
+                        df_display['Similitud'] = df_display['Similitud'].apply(
+                            lambda x: f"{x:.1f}%"
+                        )
+                        df_display['MV (TM)'] = df_display['MV (TM)'].apply(
+                            lambda x: f"€{x/1e6:.1f}M"
+                        )
+                        df_display['Gap'] = df_display['Gap'].apply(
+                            lambda x: f"x{x:.2f}" if pd.notna(x) else "-"
+                        )
+                        df_display['Score'] = df_display['Score'].round(1)
+                        
+                        st.dataframe(df_display, use_container_width=True, height=500)
+
+# ============================================================================
+# MÓDULO 3: UNDERVALUED
+# ============================================================================
+
+elif "Módulo 3" in module:
+    st.title("💎 Undervalued Players")
+    st.markdown("Jugadores infravalorados con alto gap ratio")
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        position = st.selectbox(
+            "Posición",
+            ["Todas"] + list(POSITION_MAP.keys()),
+            key="underval_pos"
+        )
+    
+    with col2:
+        min_gap = st.slider("Gap ratio mínimo", 1.0, 5.0, 1.5, 0.1)
+    
+    with col3:
+        season = st.selectbox(
+            "Temporada",
+            sorted(df['season'].unique(), reverse=True),
+            key="underval_season"
+        )
+    
+    if st.button("💎 Buscar", type="primary"):
+        df_search = df[
+            (df['season'] == season) &
+            (df['gap_ratio'] >= min_gap) &
+            (df['performance_score'] >= 60) &
+            (df['total_90s'] >= 15)
+        ].copy()
+        
+        if position != "Todas":
+            df_search = df_search[
+                df_search['archetype'].isin(POSITION_MAP[position])
+            ]
+        
+        if len(df_search) == 0:
+            st.warning("Sin resultados")
+        else:
+            df_result = df_search.nlargest(20, 'gap_ratio')
+            
+            st.success(f"✅ {len(df_result)} oportunidades encontradas")
+            
+            df_display = df_result[[
+                'Player', 'archetype', 'domestic_league', 'Age',
+                'performance_score', 'market_value_current',
+                'predicted_market_value', 'gap_ratio'
+            ]].copy()
+            
+            df_display.columns = [
+                'Jugador', 'Arquetipo', 'Liga', 'Edad',
+                'Score', 'MV (TM)', 'MV (Pred)', 'Gap'
+            ]
+            
+            for col in ['MV (TM)', 'MV (Pred)']:
+                df_display[col] = df_display[col].apply(
+                    lambda x: f"€{x/1e6:.1f}M"
+                )
+            df_display['Gap'] = df_display['Gap'].apply(lambda x: f"x{x:.2f}")
+            df_display['Score'] = df_display['Score'].round(1)
+            
+            st.dataframe(df_display, use_container_width=True, height=600)
+
+# ============================================================================
+# MÓDULO 4: WONDERKIDS
+# ============================================================================
+
+elif "Módulo 4" in module:
+    st.title("⭐ Wonderkids")
+    st.markdown("Jóvenes talentos con alto rendimiento")
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        max_age = st.slider("Edad máxima", 16, 23, 21)
+    
+    with col2:
+        budget = st.number_input(
+            "Presupuesto máx (M€)",
+            0.0, 200.0, 50.0, 5.0,
+            key="wk_budget"
+        ) * 1_000_000
+    
+    with col3:
+        position = st.selectbox(
+            "Posición",
+            ["Todas"] + list(POSITION_MAP.keys()),
+            key="wk_pos"
+        )
+    
+    season = st.selectbox(
+        "Temporada",
+        sorted(df['season'].unique(), reverse=True),
+        key="wk_season"
+    )
+    
+    if st.button("⭐ Buscar", type="primary"):
+        df_search = df[
+            (df['season'] == season) &
+            (df['Age'] <= max_age) &
+            (df['market_value_current'] <= budget) &
+            (df['performance_score'] >= 50) &
+            (df['total_90s'] >= 10)
+        ].copy()
+        
+        if position != "Todas":
+            df_search = df_search[
+                df_search['archetype'].isin(POSITION_MAP[position])
+            ]
+        
+        if len(df_search) == 0:
+            st.warning("Sin resultados")
+        else:
+            df_search['age_bonus'] = (max_age - df_search['Age'] + 1) * 2
+            df_search['wk_score'] = (
+                df_search['performance_score'] + df_search['age_bonus']
+            )
+            
+            df_result = df_search.nlargest(20, 'wk_score')
+            
+            st.success(f"✅ {len(df_result)} wonderkids encontrados")
+            
+            df_display = df_result[[
+                'Player', 'archetype', 'domestic_league', 'Age',
+                'performance_score', 'wk_score',
+                'market_value_current', 'gap_ratio'
+            ]].copy()
+            
+            df_display.columns = [
+                'Jugador', 'Arquetipo', 'Liga', 'Edad',
+                'Score', 'WK Score', 'MV (TM)', 'Gap'
+            ]
+            
+            df_display['MV (TM)'] = df_display['MV (TM)'].apply(
+                lambda x: f"€{x/1e6:.1f}M"
+            )
+            df_display['Gap'] = df_display['Gap'].apply(
+                lambda x: f"x{x:.2f}" if pd.notna(x) else "-"
+            )
+            df_display[['Score', 'WK Score']] = df_display[['Score', 'WK Score']].round(1)
+            
+            st.dataframe(df_display, use_container_width=True, height=600)
+
+# ============================================================================
+# MÓDULO 5: FLIP OPPORTUNITIES
+# ============================================================================
+
+elif "Módulo 5" in module:
+    st.title("🔄 Flip Opportunities")
+    st.markdown("Compra-reventa: gap alto + edad óptima")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        budget = st.number_input(
+            "Presupuesto (M€)",
+            0.5, 50.0, 20.0, 2.0,
+            key="flip_budget"
+        ) * 1_000_000
+    
+    with col2:
+        max_age = st.slider("Edad máxima", 20, 28, 26, key="flip_age")
+    
+    position = st.selectbox(
+        "Posición",
+        ["Todas"] + list(POSITION_MAP.keys()),
+        key="flip_pos"
+    )
+    
+    season = st.selectbox(
+        "Temporada",
+        sorted(df['season'].unique(), reverse=True),
+        key="flip_season"
+    )
+    
+    if st.button("🔄 Buscar", type="primary"):
+        df_search = df[
+            (df['season'] == season) &
+            (df['Age'] <= max_age) &
+            (df['market_value_current'] <= budget) &
+            (df['market_value_current'] >= 500_000) &
+            (df['gap_ratio'] >= 1.3) &
+            (df['performance_score'] >= 55) &
+            (df['total_90s'] >= 15)
+        ].copy()
+        
+        if position != "Todas":
+            df_search = df_search[
+                df_search['archetype'].isin(POSITION_MAP[position])
+            ]
+        
+        if len(df_search) == 0:
+            st.warning("Sin resultados")
+        else:
+            df_search['flip_score'] = (
+                df_search['gap_ratio'] * 30 +
+                df_search['performance_score'] * 0.5 +
+                (max_age - df_search['Age']) * 2
+            )
+            
+            df_result = df_search.nlargest(20, 'flip_score')
+            
+            st.success(f"✅ {len(df_result)} oportunidades encontradas")
+            
+            df_display = df_result[[
+                'Player', 'archetype', 'domestic_league', 'Age',
+                'performance_score', 'market_value_current',
+                'predicted_market_value', 'gap_ratio'
+            ]].copy()
+            
+            df_display.columns = [
+                'Jugador', 'Arquetipo', 'Liga', 'Edad',
+                'Score', 'MV (TM)', 'MV (Pred)', 'Gap'
+            ]
+            
+            for col in ['MV (TM)', 'MV (Pred)']:
+                df_display[col] = df_display[col].apply(
+                    lambda x: f"€{x/1e6:.1f}M"
+                )
+            df_display['Gap'] = df_display['Gap'].apply(lambda x: f"x{x:.2f}")
+            df_display['Score'] = df_display['Score'].round(1)
+            
+            st.dataframe(df_display, use_container_width=True, height=600)
