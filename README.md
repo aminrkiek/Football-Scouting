@@ -1,4 +1,4 @@
-# Primeira Analytics - Sistema de Scouting
+# Sistema de Scouting
 
 Sistema de análisis y scouting de jugadores con 5 módulos:
 
