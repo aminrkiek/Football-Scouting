@@ -89,13 +89,6 @@ if 'watchlist' not in st.session_state:
     st.session_state.watchlist = []
 if 'show_intro' not in st.session_state:
     st.session_state.show_intro = True
-if 'last_module' not in st.session_state:
-    st.session_state.last_module = None
-# Limpiar resultados al cambiar de módulo
-if st.session_state.last_module != module:
-    st.session_state.search_results = None
-    st.session_state.selected_player_idx = None
-    st.session_state.last_module = module
 
 def create_radar_chart(player_row, archetype):
     weights = archetype_weights.get(archetype, {})
@@ -273,6 +266,15 @@ st.sidebar.info(
 
 if len(st.session_state.watchlist) > 0:
     st.sidebar.success(f"⭐ Watchlist: {len(st.session_state.watchlist)}")
+
+# Limpiar resultados al cambiar de módulo
+if 'last_module' not in st.session_state:
+    st.session_state.last_module = module
+
+if st.session_state.last_module != module:
+    st.session_state.search_results = None
+    st.session_state.selected_player_idx = None
+    st.session_state.last_module = module
 
 # MÓDULO HOME con intro
 if "Inicio" in module:
