@@ -9,7 +9,7 @@ import base64
 import io
 
 st.set_page_config(
-    page_title="Insight Scouting - AI Football Analytics",
+    page_title="Insight Scouting - Football Analytics",
     page_icon="⚽",
     layout="wide",
     initial_sidebar_state="expanded"
