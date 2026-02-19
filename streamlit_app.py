@@ -237,7 +237,7 @@ try:
 except:
     st.sidebar.markdown("# ⚽ Insight Scouting")
 
-st.sidebar.markdown("### AI Football Analytics")
+st.sidebar.markdown("### Football Analytics")
 st.sidebar.markdown("---")
 
 module = st.sidebar.radio(
