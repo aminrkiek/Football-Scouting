@@ -89,6 +89,13 @@ if 'watchlist' not in st.session_state:
     st.session_state.watchlist = []
 if 'show_intro' not in st.session_state:
     st.session_state.show_intro = True
+if 'last_module' not in st.session_state:
+    st.session_state.last_module = None
+# Limpiar resultados al cambiar de módulo
+if st.session_state.last_module != module:
+    st.session_state.search_results = None
+    st.session_state.selected_player_idx = None
+    st.session_state.last_module = module
 
 def create_radar_chart(player_row, archetype):
     weights = archetype_weights.get(archetype, {})
@@ -212,10 +219,13 @@ def show_player_profile(player_row):
             st.plotly_chart(fig, use_container_width=True)
 
 def export_to_csv(df_results, filename="search_results.csv"):
-    csv = df_results.to_csv(index=False)
-    b64 = base64.b64encode(csv.encode()).decode()
-    href = f'<a href="data:file/csv;base64,{b64}" download="{filename}">📥 Descargar CSV</a>'
-    st.markdown(href, unsafe_allow_html=True)
+    try:
+        csv = df_results.to_csv(index=False)
+        b64 = base64.b64encode(csv.encode()).decode()
+        href = f'<a href="data:file/csv;base64,{b64}" download="{filename}">📥 Descargar CSV</a>'
+        st.markdown(href, unsafe_allow_html=True)
+    except Exception as e:
+        st.error(f"Error al exportar: {str(e)}")
 
 def add_to_history(search_type, params):
     """Añadir búsqueda al historial"""
@@ -284,7 +294,7 @@ if "Inicio" in module:
         st.markdown("---")
     
     st.markdown("<div class='big-title'>⚽ Insight Scouting</div>", unsafe_allow_html=True)
-    st.markdown("### Sistema de Scouting Inteligente con Machine Learning")
+    st.markdown("### Sistema de Scouting Inteligente: Valoración de Activos Deportivos mediante Modelización No Lineal")
     
     st.markdown("""
     **Insight Scouting** es una plataforma avanzada de análisis futbolístico que combina:
@@ -664,8 +674,8 @@ elif "Best by Budget" in module:
         with col_exp1:
             st.success(f"✅ {len(df_result)} jugadores")
         with col_exp2:
-            export_to_csv(df_result[['Player', 'Age', 'archetype', 'performance_score', 
-                                     'market_value_current', 'predicted_transfer_fee']])
+            cols_to_export = [col for col in ['Player', 'Age', 'archetype', 'performance_score', 'market_value_current', 'predicted_transfer_fee'] if col in df_result.columns]
+            export_to_csv(df_result[cols_to_export])
         
         if st.session_state.selected_player_idx is not None:
             player = df_result.iloc[st.session_state.selected_player_idx]
@@ -730,8 +740,8 @@ elif "Undervalued" in module:
         with col_exp1:
             st.success(f"✅ {len(df_result)} oportunidades")
         with col_exp2:
-            export_to_csv(df_result[['Player', 'Age', 'archetype', 'performance_score', 
-                                     'market_value_current', 'gap_ratio']], "undervalued.csv")
+            cols_to_export = [col for col in ['Player', 'Age', 'archetype', 'performance_score', 'market_value_current', 'gap_ratio'] if col in df_result.columns]
+            export_to_csv(df_result[cols_to_export], "undervalued.csv")
         
         if st.session_state.selected_player_idx is not None:
             player = df_result.iloc[st.session_state.selected_player_idx]
@@ -800,7 +810,8 @@ elif "Wonderkids" in module:
         with col_exp1:
             st.success(f"✅ {len(df_result)} wonderkids")
         with col_exp2:
-            export_to_csv(df_result[['Player', 'Age', 'performance_score', 'wk_score', 'market_value_current']], "wonderkids.csv")
+            cols_to_export = [col for col in ['Player', 'Age', 'performance_score', 'wk_score', 'market_value_current'] if col in df_result.columns]
+            export_to_csv(df_result[cols_to_export], "wonderkids.csv")
         
         if st.session_state.selected_player_idx is not None:
             player = df_result.iloc[st.session_state.selected_player_idx]
@@ -874,8 +885,8 @@ elif "Flip Opportunities" in module:
         with col_exp1:
             st.success(f"✅ {len(df_result)} oportunidades")
         with col_exp2:
-            export_to_csv(df_result[['Player', 'Age', 'performance_score', 
-                                     'market_value_current', 'gap_ratio']], "flip_opportunities.csv")
+            cols_to_export = [col for col in ['Player', 'Age', 'performance_score', 'market_value_current', 'gap_ratio'] if col in df_result.columns]
+            export_to_csv(df_result[cols_to_export], "flip_opportunities.csv")
         
         if st.session_state.selected_player_idx is not None:
             player = df_result.iloc[st.session_state.selected_player_idx]
